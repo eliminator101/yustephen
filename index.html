@@ -1,19 +1,568 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Display Example.com</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Floating Earth</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Pinyon+Script&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@300;400;700;900&family=Lavishly+Yours&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Jim+Nightshade&display=swap" rel="stylesheet">
     <style>
-        body { margin: 0; padding: 0; }
-        iframe {
-            width: 100%;
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            background: #0a0a0f;
+            color: #f5f5f0;
+            font-family: 'Inter', sans-serif;
+            line-height: 1.5;
+        }
+
+        /* Hero / Earth stage */
+        .hero {
+            position: relative;
             height: 100vh;
-            border: none;
+            width: 100%;
+            overflow: hidden;
+            background: radial-gradient(ellipse at center, #1a1a2e 0%, #0a0a0f 70%);
+        }
+
+        #canvas-container {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #fff;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            letter-spacing: 3px;
+            pointer-events: none;
+            transition: opacity 0.5s ease;
+            z-index: 3;
+        }
+
+        #loading.hidden {
+            opacity: 0;
+        }
+
+        .shade {
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.45);
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        .scroll-hint {
+            position: absolute;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.65rem;
+            letter-spacing: 2px;
+            color: rgba(0, 212, 255, 0.7);
+            z-index: 3;
+            animation: pulse 2.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.5; transform: translateX(-50%) translateY(0); }
+            50% { opacity: 1; transform: translateX(-50%) translateY(4px); }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .scroll-hint {
+                animation: none;
+            }
+        }
+
+        /* Banner section */
+        .banner {
+            position: relative;
+            background: #0d0d14;
+            border-top: 1px solid rgba(0, 212, 255, 0.35);
+            padding: 80px 8vw;
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 60px;
+            align-items: center;
+            z-index: 2;
+        }
+
+        .banner::before {
+            content: "";
+            position: absolute;
+            top: -1px;
+            left: 0;
+            width: 35%;
+            height: 1px;
+            background: #00d4ff;
+            box-shadow: 0 0 12px #00d4ff;
+        }
+
+        .eyebrow {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            letter-spacing: 2px;
+            color: #00d4ff;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+
+        .handwritten {
+            width: 100%;
+            height: auto;
+            display: block;
+            overflow: visible;
+        }
+
+        .handwritten text {
+            font-family: "Pinyon Script", cursive;
+            font-size: 130px;
+            fill: rgba(0, 212, 255, 0.15);
+            stroke: #00d4ff;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        #reveal-rect {
+            width: 0;
+        }
+
+        .reveal.visible #reveal-rect {
+            animation: reveal 3s ease forwards;
+        }
+
+        @keyframes reveal {
+            to {
+                width: 800px;
+            }
+        }
+
+        .banner h2 {
+            font-size: clamp(2.5rem, 6vw, 5rem);
+            font-weight: 900;
+            line-height: 1.0;
+            letter-spacing: -0.03em;
+        }
+
+        .banner p {
+            font-family: "Jim Nightshade", cursive;
+            font-size: 2rem;
+            color: rgba(245, 245, 240, 0.75);
+            max-width: 560px;
+            min-height: 5em;
+        }
+
+        .type-text {
+            display: inline;
+        }
+
+        .cursor {
+            display: inline;
+            color: #00d4ff;
+            font-weight: 300;
+            animation: blink 1s step-end infinite;
+        }
+
+        .cursor.done {
+            animation: none;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        .meta {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: rgba(245, 245, 240, 0.5);
+            margin-top: 24px;
+        }
+
+        /* About section */
+        .about {
+            padding: 120px 8vw;
+            background: #0a0a0f;
+            position: relative;
+            z-index: 2;
+        }
+
+        .section-label {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            letter-spacing: 2px;
+            color: rgba(0, 212, 255, 0.8);
+            text-transform: uppercase;
+            margin-bottom: 48px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1px;
+            background: rgba(0, 212, 255, 0.12);
+            border: 1px solid rgba(0, 212, 255, 0.12);
+        }
+
+        .card {
+            background: #0d0d14;
+            padding: 40px;
+        }
+
+        .card-label {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.65rem;
+            letter-spacing: 1.5px;
+            color: rgba(245, 245, 240, 0.45);
+            text-transform: uppercase;
+            margin-bottom: 16px;
+        }
+
+        .card h3 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+
+        .card p {
+            font-size: 0.95rem;
+            color: rgba(245, 245, 240, 0.65);
+        }
+
+        /* Footer */
+        .footer {
+            padding: 40px 8vw;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.65rem;
+            color: rgba(245, 245, 240, 0.35);
+            border-top: 1px solid rgba(0, 212, 255, 0.1);
+            position: relative;
+            z-index: 2;
+        }
+
+        /* Scroll reveal */
+        .reveal {
+            opacity: 0;
+            transform: translateY(30px);
+            transition: opacity 0.8s ease, transform 0.8s ease;
+        }
+
+        .reveal.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .reveal {
+                opacity: 1;
+                transform: none;
+                transition: none;
+            }
+        }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            .banner {
+                grid-template-columns: 1fr;
+                gap: 32px;
+                padding: 64px 6vw;
+            }
+
+            .grid {
+                grid-template-columns: 1fr;
+            }
+
+            .card {
+                padding: 32px 6vw;
+            }
+
+            .about, .footer {
+                padding-left: 6vw;
+                padding-right: 6vw;
+            }
         }
     </style>
 </head>
 <body>
-    <!-- This will only work if example.com allows iframes -->
-    <!-- Most sites block this! -->
-    <iframe src="https://eliminator101.github.io/nexus"></iframe>
+    <section class="hero">
+        <div id="loading">LOADING EARTH...</div>
+        <div id="canvas-container"></div>
+        <div class="shade"></div>
+        <div class="scroll-hint">SCROLL TO RECEIVE TRANSMISSION</div>
+    </section>
+
+    <section class="banner reveal">
+        <div>
+            <svg viewBox="0 0 800 160" xmlns="http://www.w3.org/2000/svg" class="handwritten">
+                <defs>
+                    <clipPath id="reveal">
+                        <rect id="reveal-rect" x="0" y="0" width="0" height="160" />
+                    </clipPath>
+                </defs>
+                <text x="0" y="55%" text-anchor="start" dominant-baseline="middle" clip-path="url(#reveal)">Hello, world</text>
+            </svg>
+        </div>
+        <div>
+            <p><span class="type-text" data-text="I'm Stephen — a developer building things that live in the world. The same curiosity that makes me orbit a problem until it makes sense is what keeps me learning."></span><span class="cursor">|</span></p>
+            <div class="meta">ORIGIN: HONG KONG</div>
+        </div>
+    </section>
+
+    <section class="about reveal">
+        <div class="section-label">// About Me</div>
+        <div class="grid">
+            <div class="card">
+                <div class="card-label">Designation</div>
+                <h3>Who I Am</h3>
+                <p>A student who is enthusiastic in software development and mathematics.</p>
+            </div>
+            <div class="card">
+                <div class="card-label">Operations</div>
+                <h3>What I Do</h3>
+                <p>Implementing creative projects and initiatives for the well-being of the wider community.</p>
+            </div>
+            <div class="card">
+                <div class="card-label">Signal</div>
+                <h3>Get In Touch</h3>
+                <p>Open to collaborations and conversations about weird ideas. Send a message anytime. Discord: eliminator_101.</p>
+            </div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        © 2026 STEPHEN YU
+    </footer>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // Scene setup
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+
+        const camera = new THREE.PerspectiveCamera(
+            45,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            1000
+        );
+        camera.position.z = 3.5;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        container.appendChild(renderer.domElement);
+
+        // Texture loader with loading UI
+        const textureLoader = new THREE.TextureLoader();
+        const loadingEl = document.getElementById('loading');
+
+        // Earth
+        const earthGeometry = new THREE.SphereGeometry(1, 64, 64);
+
+        const earthMaterial = new THREE.MeshPhongMaterial({
+            map: textureLoader.load(
+                'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_atmos_2048.jpg',
+                () => loadingEl.classList.add('hidden')
+            ),
+            specularMap: textureLoader.load(
+                'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_specular_2048.jpg'
+            ),
+            normalMap: textureLoader.load(
+                'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_normal_2048.jpg'
+            ),
+            specular: new THREE.Color(0x333333),
+            shininess: 15
+        });
+
+        const earth = new THREE.Mesh(earthGeometry, earthMaterial);
+        scene.add(earth);
+
+        // Atmosphere glow
+        const atmosphereGeometry = new THREE.SphereGeometry(1.12, 64, 64);
+        const atmosphereMaterial = new THREE.ShaderMaterial({
+            transparent: true,
+            side: THREE.BackSide,
+            uniforms: {},
+            vertexShader: `
+                varying vec3 vNormal;
+                void main() {
+                    vNormal = normalize(normalMatrix * normal);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                varying vec3 vNormal;
+                void main() {
+                    float intensity = pow(0.65 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 2.0);
+                    gl_FragColor = vec4(0.3, 0.6, 1.0, 1.0) * intensity * 1.5;
+                }
+            `,
+            blending: THREE.AdditiveBlending
+        });
+
+        const atmosphere = new THREE.Mesh(atmosphereGeometry, atmosphereMaterial);
+        scene.add(atmosphere);
+
+        // Starfield background
+        const starsGeometry = new THREE.BufferGeometry();
+        const starsCount = 3000;
+        const positions = new Float32Array(starsCount * 3);
+        const sizes = new Float32Array(starsCount);
+
+        for (let i = 0; i < starsCount; i++) {
+            const i3 = i * 3;
+            positions[i3] = (Math.random() - 0.5) * 100;
+            positions[i3 + 1] = (Math.random() - 0.5) * 100;
+            positions[i3 + 2] = (Math.random() - 0.5) * 100;
+            sizes[i] = Math.random() * 0.05 + 0.01;
+        }
+
+        starsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        starsGeometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+        const starsMaterial = new THREE.PointsMaterial({
+            color: 0xffffff,
+            size: 0.05,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity: 1
+        });
+
+        const stars = new THREE.Points(starsGeometry, starsMaterial);
+        scene.add(stars);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+        scene.add(ambientLight);
+
+        const sunLight = new THREE.DirectionalLight(0xffffff, 2.0);
+        sunLight.position.set(5, 3, 5);
+        scene.add(sunLight);
+
+        const backLight = new THREE.DirectionalLight(0x4455ff, 0.5);
+        backLight.position.set(-5, -2, -5);
+        scene.add(backLight);
+
+        // Mouse interaction for subtle parallax
+        let mouseX = 0;
+        let mouseY = 0;
+        let targetRotationX = 0;
+        let targetRotationY = 0;
+
+        document.addEventListener('mousemove', (event) => {
+            mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+            mouseY = (event.clientY / window.innerHeight) * 2 - 1;
+        });
+
+        // Animation
+        let time = 0;
+
+        function animate() {
+            requestAnimationFrame(animate);
+            time += 0.01;
+
+            // Rotate Earth
+            earth.rotation.y += 0.0015;
+
+            // Float up and down
+            earth.position.y = Math.sin(time) * 0.08;
+            atmosphere.position.y = earth.position.y;
+
+            // Subtle mouse parallax
+            targetRotationY = mouseX * 0.15;
+            targetRotationX = mouseY * 0.15;
+
+            earth.rotation.x += (targetRotationX - earth.rotation.x) * 0.05;
+            earth.rotation.z += (targetRotationY - earth.rotation.z) * 0.05;
+
+            // Slowly rotate starfield
+            stars.rotation.y += 0.0002;
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // Responsive resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Scroll reveal
+        const revealElements = document.querySelectorAll('.reveal');
+        const revealObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                    if (entry.target.classList.contains('banner')) {
+                        startTyping();
+                    }
+                    revealObserver.unobserve(entry.target);
+                }
+            });
+        }, {
+            threshold: 0.15,
+            rootMargin: '0px 0px -50px 0px'
+        });
+
+        revealElements.forEach(el => revealObserver.observe(el));
+
+        // Typewriter effect for banner paragraph
+        const typeText = document.querySelector('.type-text');
+        const cursor = document.querySelector('.cursor');
+        let typingStarted = false;
+
+        function startTyping() {
+            if (!typeText || typingStarted) return;
+            typingStarted = true;
+            const fullText = typeText.dataset.text || '';
+            let charIndex = 0;
+
+            function type() {
+                if (charIndex < fullText.length) {
+                    typeText.textContent += fullText.charAt(charIndex);
+                    charIndex++;
+                    setTimeout(type, 32);
+                } 
+            }
+
+            type();
+        }
+    </script>
 </body>
 </html>
