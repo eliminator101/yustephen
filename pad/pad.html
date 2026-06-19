@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Sketchpad</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #fff;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      touch-action: none;
+    }
+    #pad {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      touch-action: none;
+      cursor: crosshair;
+      background: #fff;
+    }
+    #pad.panning { cursor: grab; }
+    #pad.panning.active { cursor: grabbing; }
+    #pad.eraser { cursor: cell; }
+    .toolbar {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      top: 12px;
+      display: flex;
+      gap: 6px;
+      padding: 8px;
+      background: rgba(255, 255, 255, 0.96);
+      border: 1px solid #e0e0e0;
+      border-radius: 14px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+      align-items: center;
+      flex-wrap: wrap;
+      max-width: calc(100vw - 24px);
+      z-index: 10;
+      user-select: none;
+    }
+    .toolbar button {
+      min-width: 44px;
+      min-height: 44px;
+      border: 1px solid #e0e0e0;
+      background: #fff;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      color: #333;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 10px;
+      transition: background 0.12s, border-color 0.12s, color 0.12s;
+    }
+    .toolbar button:hover { background: #f5f5f5; }
+    .toolbar button.active {
+      background: #e3f2fd;
+      border-color: #2196f3;
+      color: #0d47a1;
+    }
+    .toolbar button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      background: #fff;
+      border-color: #e0e0e0;
+      color: #999;
+    }
+    .toolbar input[type="color"] {
+      width: 44px;
+      height: 44px;
+      border: 1px solid #e0e0e0;
+      border-radius: 10px;
+      background: #fff;
+      cursor: pointer;
+      padding: 2px;
+    }
+    .toolbar input[type="range"] {
+      width: 90px;
+      height: 44px;
+      cursor: pointer;
+    }
+    .separator {
+      width: 1px;
+      height: 32px;
+      background: #e0e0e0;
+      margin: 0 4px;
+    }
+    .group { display: flex; gap: 4px; align-items: center; }
+    .eraser-modes { display: none; }
+    .eraser-modes.visible { display: flex; gap: 4px; }
+    @media (max-width: 720px) {
+      .toolbar {
+        top: auto;
+        bottom: 12px;
+        padding: 6px;
+        gap: 4px;
+      }
+      .toolbar button {
+        min-width: 40px;
+        min-height: 40px;
+        font-size: 12px;
+        padding: 0 8px;
+      }
+      .toolbar input[type="color"] {
+        width: 40px;
+        height: 40px;
+      }
+      .toolbar input[type="range"] { width: 70px; height: 40px; }
+      .separator { height: 28px; margin: 0 2px; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="pad"></canvas>
+  <div class="toolbar" id="toolbar">
+    <div class="group">
+      <button id="tool-pen" class="tool-btn active" data-tool="pen">Pen</button>
+      <button id="tool-highlighter" class="tool-btn" data-tool="highlighter">Highlighter</button>
+      <button id="tool-eraser" class="tool-btn" data-tool="eraser">Eraser</button>
+    </div>
+    <div class="eraser-modes" id="eraser-modes">
+      <button class="eraser-sub active" data-sub="stroke">Stroke</button>
+      <button class="eraser-sub" data-sub="precision">Precision</button>
+      <button class="eraser-sub" data-sub="highlighter">Highlighter</button>
+    </div>
+    <div class="separator"></div>
+    <div class="group">
+      <input type="color" id="color-picker" value="#000000" title="Color">
+      <input type="range" id="width-slider" min="1" max="50" value="3" title="Pen width / Eraser size">
+    </div>
+    <div class="separator"></div>
+    <div class="group">
+      <button id="mode-toggle">Pan</button>
+    </div>
+    <div class="separator"></div>
+    <div class="group">
+      <button id="undo" disabled>Undo</button>
+      <button id="redo" disabled>Redo</button>
+    </div>
+    <div class="separator"></div>
+    <div class="group">
+      <button id="zoom-in" title="Zoom in">+</button>
+      <button id="zoom-out" title="Zoom out">−</button>
+      <button id="zoom-reset" title="Reset view">Reset</button>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      'use strict';
+
+      const canvas = document.getElementById('pad');
+      const ctx = canvas.getContext('2d', { alpha: false });
+      const toolbar = document.getElementById('toolbar');
+      let dpr = window.devicePixelRatio || 1;
+
+      const view = { scale: 1, offsetX: 0, offsetY: 0 };
+      const app = {
+        strokes: [],
+        tool: 'pen',
+        eraserSub: 'stroke',
+        mode: 'draw',
+        color: '#000000',
+        width: 3,
+        undoStack: [],
+        redoStack: []
+      };
+
+      let currentStroke = null;
+      let currentErasePoints = null;
+      let isPanning = false;
+      let panStart = null;
+      let viewStart = null;
+      let spacePressed = false;
+      const activePointers = new Map();
+      let pinchStart = null;
+      let eraserCursor = { x: 0, y: 0, visible: false };
+      let previewErasedStrokeIds = new Set();
+      let erasedThisDrag = new Set();
+
+      // ---------- Commands ----------
+      class AddStrokeCommand {
+        constructor(stroke) { this.stroke = stroke; }
+        execute() { app.strokes.push(this.stroke); }
+        unexecute() {
+          const i = app.strokes.indexOf(this.stroke);
+          if (i !== -1) app.strokes.splice(i, 1);
+        }
+      }
+
+      class RemoveStrokeCommand {
+        constructor(stroke) { this.stroke = stroke; }
+        execute() {
+          const i = app.strokes.indexOf(this.stroke);
+          if (i !== -1) app.strokes.splice(i, 1);
+        }
+        unexecute() { app.strokes.push(this.stroke); }
+      }
+
+      class RemoveStrokesCommand {
+        constructor(strokes) { this.strokes = strokes; }
+        execute() {
+          for (const s of this.strokes) {
+            const i = app.strokes.indexOf(s);
+            if (i !== -1) app.strokes.splice(i, 1);
+          }
+        }
+        unexecute() { app.strokes.push(...this.strokes); }
+      }
+
+      class PrecisionEraseCommand {
+        constructor(removed, added) {
+          this.removed = removed;
+          this.added = added;
+        }
+        execute() {
+          for (const s of this.removed) {
+            const i = app.strokes.indexOf(s);
+            if (i !== -1) app.strokes.splice(i, 1);
+          }
+          app.strokes.push(...this.added);
+        }
+        unexecute() {
+          for (const s of this.added) {
+            const i = app.strokes.indexOf(s);
+            if (i !== -1) app.strokes.splice(i, 1);
+          }
+          app.strokes.push(...this.removed);
+        }
+      }
+
+      function executeCommand(cmd) {
+        cmd.execute();
+        app.undoStack.push(cmd);
+        app.redoStack.length = 0;
+        updateHistoryButtons();
+        render();
+      }
+
+      function undo() {
+        if (app.undoStack.length === 0) return;
+        const cmd = app.undoStack.pop();
+        cmd.unexecute();
+        app.redoStack.push(cmd);
+        updateHistoryButtons();
+        render();
+      }
+
+      function redo() {
+        if (app.redoStack.length === 0) return;
+        const cmd = app.redoStack.pop();
+        cmd.execute();
+        app.undoStack.push(cmd);
+        updateHistoryButtons();
+        render();
+      }
+
+      // ---------- Coordinate helpers ----------
+      function screenToWorld(sx, sy) {
+        return {
+          x: sx / view.scale - view.offsetX,
+          y: sy / view.scale - view.offsetY
+        };
+      }
+
+      function worldToScreen(wx, wy) {
+        return {
+          x: (wx + view.offsetX) * view.scale,
+          y: (wy + view.offsetY) * view.scale
+        };
+      }
+
+      function getPointerPos(e) {
+        return screenToWorld(e.clientX, e.clientY);
+      }
+
+      // ---------- Stroke helpers ----------
+      function createStroke(props) {
+        const stroke = {
+          id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
+          tool: props.tool,
+          color: props.color,
+          width: props.width,
+          opacity: props.opacity,
+          isHighlighter: props.isHighlighter,
+          points: props.points,
+          bounds: null
+        };
+        updateBounds(stroke);
+        return stroke;
+      }
+
+      function updateBounds(stroke) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const p of stroke.points) {
+          minX = Math.min(minX, p.x);
+          minY = Math.min(minY, p.y);
+          maxX = Math.max(maxX, p.x);
+          maxY = Math.max(maxY, p.y);
+        }
+        stroke.bounds = { minX, minY, maxX, maxY };
+      }
+
+      function drawStroke(stroke, preview = false) {
+        const pts = stroke.points;
+        if (pts.length === 0) return;
+        ctx.save();
+        ctx.globalAlpha = preview ? stroke.opacity * 0.35 : stroke.opacity;
+        ctx.strokeStyle = stroke.color;
+        ctx.lineWidth = stroke.width;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        if (preview) ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        if (pts.length === 1) {
+          ctx.arc(pts[0].x, pts[0].y, stroke.width / 2, 0, Math.PI * 2);
+          ctx.fillStyle = stroke.color;
+          ctx.globalAlpha = preview ? stroke.opacity * 0.35 : stroke.opacity;
+          ctx.fill();
+        } else {
+          ctx.moveTo(pts[0].x, pts[0].y);
+          for (let i = 1; i < pts.length - 1; i++) {
+            const midX = (pts[i].x + pts[i + 1].x) / 2;
+            const midY = (pts[i].y + pts[i + 1].y) / 2;
+            ctx.quadraticCurveTo(pts[i].x, pts[i].y, midX, midY);
+          }
+          const last = pts[pts.length - 1];
+          ctx.lineTo(last.x, last.y);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      // ---------- Rendering ----------
+      function render() {
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.setTransform(
+          view.scale * dpr, 0,
+          0, view.scale * dpr,
+          view.offsetX * view.scale * dpr,
+          view.offsetY * view.scale * dpr
+        );
+
+        for (const stroke of app.strokes) {
+          const preview = previewErasedStrokeIds.has(stroke.id) || erasedThisDrag.has(stroke);
+          drawStroke(stroke, preview);
+        }
+        if (currentStroke) drawStroke(currentStroke);
+        drawEraserCursor();
+
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      function drawEraserCursor() {
+        if (!eraserCursor.visible || app.tool !== 'eraser') return;
+        if (app.mode === 'pan' || spacePressed || isPanning || activePointers.size >= 2) return;
+
+        const radiusScreen = app.width;
+        ctx.save();
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.beginPath();
+        ctx.arc(eraserCursor.x, eraserCursor.y, radiusScreen, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function resize() {
+        dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.floor(window.innerWidth * dpr);
+        canvas.height = Math.floor(window.innerHeight * dpr);
+        canvas.style.width = window.innerWidth + 'px';
+        canvas.style.height = window.innerHeight + 'px';
+        render();
+      }
+
+      // ---------- Hit testing ----------
+      function dist2(a, b) {
+        const dx = a.x - b.x, dy = a.y - b.y;
+        return dx * dx + dy * dy;
+      }
+
+      function distToSegment(p, a, b) {
+        const l2 = dist2(a, b);
+        if (l2 === 0) return Math.sqrt(dist2(p, a));
+        let t = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2;
+        t = Math.max(0, Math.min(1, t));
+        return Math.sqrt(dist2(p, { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) }));
+      }
+
+      function hitTestStroke(stroke, point, radius) {
+        const b = stroke.bounds;
+        if (!b) return false;
+        const r = radius;
+        if (point.x < b.minX - r || point.x > b.maxX + r || point.y < b.minY - r || point.y > b.maxY + r) return false;
+        const pts = stroke.points;
+        for (let i = 0; i < pts.length - 1; i++) {
+          if (distToSegment(point, pts[i], pts[i + 1]) <= r) return true;
+        }
+        return pts.length === 1 && Math.sqrt(dist2(point, pts[0])) <= r;
+      }
+
+      function findHitStroke(point, radius, onlyHighlighter) {
+        for (let i = app.strokes.length - 1; i >= 0; i--) {
+          const s = app.strokes[i];
+          if (onlyHighlighter && !s.isHighlighter) continue;
+          if (hitTestStroke(s, point, radius)) return s;
+        }
+        return null;
+      }
+
+      // ---------- Precision erase ----------
+      function splitContiguous(points) {
+        const groups = [];
+        let group = [];
+        for (const p of points) {
+          if (p.__keep) {
+            group.push({ x: p.x, y: p.y, t: p.t });
+          } else if (group.length) {
+            groups.push(group);
+            group = [];
+          }
+        }
+        if (group.length) groups.push(group);
+        return groups;
+      }
+
+      function isNearEraserPoint(p, eraserPoints, radius) {
+        const r2 = radius * radius;
+        for (const e of eraserPoints) {
+          const dx = p.x - e.x, dy = p.y - e.y;
+          if (dx * dx + dy * dy <= r2) return true;
+        }
+        return false;
+      }
+
+      function getEraserBounds(eraserPoints, radius) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const p of eraserPoints) {
+          minX = Math.min(minX, p.x);
+          minY = Math.min(minY, p.y);
+          maxX = Math.max(maxX, p.x);
+          maxY = Math.max(maxY, p.y);
+        }
+        return { minX: minX - radius, minY: minY - radius, maxX: maxX + radius, maxY: maxY + radius };
+      }
+
+      function boundsIntersect(a, b) {
+        return a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY;
+      }
+
+      function sampleEraserPoints(points, minDist) {
+        if (points.length === 0) return [];
+        const sampled = [points[0]];
+        const minDist2 = minDist * minDist;
+        for (let i = 1; i < points.length; i++) {
+          const last = sampled[sampled.length - 1];
+          const dx = points[i].x - last.x;
+          const dy = points[i].y - last.y;
+          if (dx * dx + dy * dy >= minDist2) {
+            sampled.push(points[i]);
+          }
+        }
+        const lastPoint = points[points.length - 1];
+        if (sampled[sampled.length - 1] !== lastPoint) {
+          sampled.push(lastPoint);
+        }
+        return sampled;
+      }
+
+      function applyPrecisionErase(eraserPoints, radius) {
+        const sampled = sampleEraserPoints(eraserPoints, radius * 0.5);
+        if (sampled.length === 0) return { removed: [], added: [] };
+
+        const eraserBounds = getEraserBounds(sampled, radius);
+        const r2 = radius * radius;
+        const removed = [];
+        const added = [];
+
+        for (const stroke of app.strokes) {
+          if (!boundsIntersect(stroke.bounds, eraserBounds)) continue;
+
+          const kept = [];
+          for (const p of stroke.points) {
+            let near = false;
+            for (const e of sampled) {
+              const dx = p.x - e.x, dy = p.y - e.y;
+              if (dx * dx + dy * dy <= r2) {
+                near = true;
+                break;
+              }
+            }
+            kept.push({ ...p, __keep: !near });
+          }
+
+          const groups = splitContiguous(kept);
+          if (groups.length === 0) {
+            removed.push(stroke);
+          } else {
+            removed.push(stroke);
+            for (const g of groups) {
+              added.push(createStroke({
+                tool: stroke.tool,
+                color: stroke.color,
+                width: stroke.width,
+                opacity: stroke.opacity,
+                isHighlighter: stroke.isHighlighter,
+                points: g
+              }));
+            }
+          }
+        }
+
+        for (const s of removed) {
+          const i = app.strokes.indexOf(s);
+          if (i !== -1) app.strokes.splice(i, 1);
+        }
+        app.strokes.push(...added);
+        return { removed, added };
+      }
+
+      function updatePreviewErase(eraserPoints, radius) {
+        const sampled = sampleEraserPoints(eraserPoints, radius * 0.5);
+        if (sampled.length === 0) {
+          previewErasedStrokeIds.clear();
+          return;
+        }
+
+        const eraserBounds = getEraserBounds(sampled, radius);
+        const r2 = radius * radius;
+        const ids = new Set();
+
+        for (const stroke of app.strokes) {
+          if (!boundsIntersect(stroke.bounds, eraserBounds)) continue;
+          for (const p of stroke.points) {
+            let near = false;
+            for (const e of sampled) {
+              const dx = p.x - e.x, dy = p.y - e.y;
+              if (dx * dx + dy * dy <= r2) {
+                near = true;
+                break;
+              }
+            }
+            if (near) {
+              ids.add(stroke.id);
+              break;
+            }
+          }
+        }
+        previewErasedStrokeIds = ids;
+      }
+
+      // ---------- Zoom / Pan ----------
+      function clampScale(s) {
+        return Math.min(Math.max(s, 0.1), 5.0);
+      }
+
+      function zoomTo(screenX, screenY, factor) {
+        const before = screenToWorld(screenX, screenY);
+        view.scale = clampScale(view.scale * factor);
+        const after = screenToWorld(screenX, screenY);
+        view.offsetX += after.x - before.x;
+        view.offsetY += after.y - before.y;
+        render();
+      }
+
+      function resetView() {
+        view.scale = 1;
+        view.offsetX = 0;
+        view.offsetY = 0;
+        render();
+      }
+
+      // ---------- Pointer handling ----------
+      function getPinchState() {
+        const vals = Array.from(activePointers.values());
+        if (vals.length !== 2) return null;
+        const dx = vals[1].x - vals[0].x;
+        const dy = vals[1].y - vals[0].y;
+        return {
+          center: { x: (vals[0].x + vals[1].x) / 2, y: (vals[0].y + vals[1].y) / 2 },
+          distance: Math.sqrt(dx * dx + dy * dy),
+          worldCenter: screenToWorld((vals[0].x + vals[1].x) / 2, (vals[0].y + vals[1].y) / 2)
+        };
+      }
+
+      function onPointerDown(e) {
+        if (e.target.closest('.toolbar')) return;
+        canvas.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if (app.tool === 'eraser') {
+          eraserCursor.x = e.clientX;
+          eraserCursor.y = e.clientY;
+          eraserCursor.visible = true;
+        }
+
+        if (activePointers.size === 2) {
+          pinchStart = getPinchState();
+          currentStroke = null;
+          currentErasePoints = null;
+          isPanning = false;
+          return;
+        }
+
+        const middleButton = e.button === 1;
+        const temporaryPan = app.mode === 'pan' || spacePressed || middleButton;
+
+        if (temporaryPan) {
+          isPanning = true;
+          panStart = { x: e.clientX, y: e.clientY };
+          viewStart = { ...view };
+          canvas.classList.add('active');
+          return;
+        }
+
+        const worldPos = getPointerPos(e);
+        if (app.tool === 'pen' || app.tool === 'highlighter') {
+          currentStroke = createStroke({
+            tool: app.tool,
+            color: app.tool === 'highlighter' ? app.color : app.color,
+            width: app.width,
+            opacity: app.tool === 'highlighter' ? 0.35 : 1.0,
+            isHighlighter: app.tool === 'highlighter',
+            points: [{ x: worldPos.x, y: worldPos.y, t: Date.now() }]
+          });
+        } else if (app.tool === 'eraser') {
+          const radius = app.width / view.scale;
+          erasedThisDrag.clear();
+          if (app.eraserSub === 'stroke') {
+            const hit = findHitStroke(worldPos, radius, false);
+            if (hit) erasedThisDrag.add(hit);
+          } else if (app.eraserSub === 'highlighter') {
+            const hit = findHitStroke(worldPos, radius, true);
+            if (hit) erasedThisDrag.add(hit);
+          } else if (app.eraserSub === 'precision') {
+            currentErasePoints = [{ x: worldPos.x, y: worldPos.y }];
+          }
+        }
+      }
+
+      function onPointerMove(e) {
+        if (!activePointers.has(e.pointerId)) return;
+        e.preventDefault();
+        activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if (app.tool === 'eraser' && !isPanning && activePointers.size < 2) {
+          eraserCursor.x = e.clientX;
+          eraserCursor.y = e.clientY;
+          eraserCursor.visible = true;
+        }
+
+        if (activePointers.size === 2) {
+          const now = getPinchState();
+          if (pinchStart && now && pinchStart.distance > 0) {
+            const factor = now.distance / pinchStart.distance;
+            const before = pinchStart.worldCenter;
+            view.scale = clampScale(view.scale * factor);
+            const after = screenToWorld(now.center.x, now.center.y);
+            view.offsetX += after.x - before.x;
+            view.offsetY += after.y - before.y;
+            pinchStart = now;
+            pinchStart.worldCenter = screenToWorld(now.center.x, now.center.y);
+            render();
+          }
+          return;
+        }
+
+        if (isPanning) {
+          const dx = (e.clientX - panStart.x) / view.scale;
+          const dy = (e.clientY - panStart.y) / view.scale;
+          view.offsetX = viewStart.offsetX + dx;
+          view.offsetY = viewStart.offsetY + dy;
+          render();
+          return;
+        }
+
+        const worldPos = getPointerPos(e);
+        if (currentStroke) {
+          currentStroke.points.push({ x: worldPos.x, y: worldPos.y, t: Date.now() });
+          updateBounds(currentStroke);
+          render();
+        } else if (currentErasePoints) {
+          currentErasePoints.push({ x: worldPos.x, y: worldPos.y });
+          updatePreviewErase(currentErasePoints, app.width / view.scale);
+          render();
+        } else if (app.tool === 'eraser' && (app.eraserSub === 'stroke' || app.eraserSub === 'highlighter')) {
+          const radius = app.width / view.scale;
+          const onlyHighlighter = app.eraserSub === 'highlighter';
+          const hit = findHitStroke(worldPos, radius, onlyHighlighter);
+          if (hit) {
+            const had = erasedThisDrag.has(hit);
+            erasedThisDrag.add(hit);
+            if (!had) render();
+          }
+        }
+      }
+
+      function onPointerUp(e) {
+        if (!activePointers.has(e.pointerId)) return;
+        e.preventDefault();
+        activePointers.delete(e.pointerId);
+        canvas.classList.remove('active');
+
+        if (activePointers.size < 2) {
+          pinchStart = null;
+        }
+
+        if (isPanning) {
+          isPanning = false;
+          panStart = null;
+          viewStart = null;
+          return;
+        }
+
+        if (currentStroke) {
+          if (currentStroke.points.length > 0) {
+            executeCommand(new AddStrokeCommand(currentStroke));
+          }
+          currentStroke = null;
+        }
+
+        if (currentErasePoints) {
+          const radius = app.width / view.scale;
+          const { removed, added } = applyPrecisionErase(currentErasePoints, radius);
+          if (removed.length > 0 || added.length > 0) {
+            executeCommand(new PrecisionEraseCommand(removed, added));
+          }
+          currentErasePoints = null;
+          previewErasedStrokeIds.clear();
+        }
+
+        if (erasedThisDrag.size > 0) {
+          executeCommand(new RemoveStrokesCommand(Array.from(erasedThisDrag)));
+          erasedThisDrag.clear();
+        }
+
+        if (activePointers.size === 0) {
+          eraserCursor.visible = false;
+        }
+      }
+
+      canvas.addEventListener('pointerdown', onPointerDown);
+      canvas.addEventListener('pointermove', onPointerMove);
+      canvas.addEventListener('pointerup', onPointerUp);
+      canvas.addEventListener('pointercancel', onPointerUp);
+      canvas.addEventListener('pointerleave', onPointerUp);
+
+      canvas.addEventListener('pointermove', e => {
+        if (app.tool === 'eraser' && !isPanning && activePointers.size < 2) {
+          eraserCursor.x = e.clientX;
+          eraserCursor.y = e.clientY;
+          eraserCursor.visible = true;
+          render();
+        }
+      });
+      canvas.addEventListener('pointerleave', e => {
+        if (activePointers.size === 0) {
+          eraserCursor.visible = false;
+          render();
+        }
+      });
+
+      // ---------- Wheel zoom ----------
+      canvas.addEventListener('wheel', e => {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.08 : 0.92;
+        zoomTo(e.clientX, e.clientY, factor);
+      }, { passive: false });
+
+      // ---------- Keyboard ----------
+      window.addEventListener('keydown', e => {
+        if (e.code === 'Space') {
+          spacePressed = true;
+          updateCursor();
+        }
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+          e.preventDefault();
+          if (e.shiftKey) redo(); else undo();
+        }
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
+          e.preventDefault();
+          redo();
+        }
+      });
+      window.addEventListener('keyup', e => {
+        if (e.code === 'Space') {
+          spacePressed = false;
+          updateCursor();
+        }
+      });
+
+      // ---------- Toolbar UI ----------
+      const toolButtons = document.querySelectorAll('.tool-btn');
+      const eraserModes = document.getElementById('eraser-modes');
+      const eraserSubs = document.querySelectorAll('.eraser-sub');
+      const colorPicker = document.getElementById('color-picker');
+      const widthSlider = document.getElementById('width-slider');
+      const modeToggle = document.getElementById('mode-toggle');
+      const undoBtn = document.getElementById('undo');
+      const redoBtn = document.getElementById('redo');
+
+      function updateToolUI() {
+        toolButtons.forEach(b => b.classList.toggle('active', b.dataset.tool === app.tool));
+        eraserModes.classList.toggle('visible', app.tool === 'eraser');
+        eraserSubs.forEach(b => b.classList.toggle('active', b.dataset.sub === app.eraserSub));
+        colorPicker.disabled = app.tool === 'eraser';
+        if (app.tool !== 'eraser') {
+          eraserCursor.visible = false;
+          previewErasedStrokeIds.clear();
+          erasedThisDrag.clear();
+          render();
+        }
+        updateCursor();
+      }
+
+      function updateCursor() {
+        canvas.classList.remove('panning', 'eraser');
+        canvas.style.cursor = 'crosshair';
+        if (app.mode === 'pan' || spacePressed) {
+          canvas.classList.add('panning');
+        } else if (app.tool === 'eraser') {
+          canvas.classList.add('eraser');
+          canvas.style.cursor = 'none';
+        }
+      }
+
+      function updateHistoryButtons() {
+        undoBtn.disabled = app.undoStack.length === 0;
+        redoBtn.disabled = app.redoStack.length === 0;
+      }
+
+      toolButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+          app.tool = btn.dataset.tool;
+          if (app.tool === 'highlighter' && app.color === '#000000') {
+            app.color = '#FFEB3B';
+            colorPicker.value = app.color;
+          }
+          updateToolUI();
+        });
+      });
+
+      eraserSubs.forEach(btn => {
+        btn.addEventListener('click', () => {
+          app.eraserSub = btn.dataset.sub;
+          updateToolUI();
+        });
+      });
+
+      colorPicker.addEventListener('input', e => {
+        app.color = e.target.value;
+      });
+
+      widthSlider.addEventListener('input', e => {
+        app.width = parseInt(e.target.value, 10);
+        if (app.tool === 'eraser') render();
+      });
+
+      modeToggle.addEventListener('click', () => {
+        app.mode = app.mode === 'draw' ? 'pan' : 'draw';
+        modeToggle.textContent = app.mode === 'draw' ? 'Pan' : 'Draw';
+        modeToggle.classList.toggle('active', app.mode === 'pan');
+        eraserCursor.visible = false;
+        previewErasedStrokeIds.clear();
+        erasedThisDrag.clear();
+        updateCursor();
+        render();
+      });
+
+      undoBtn.addEventListener('click', undo);
+      redoBtn.addEventListener('click', redo);
+      document.getElementById('zoom-in').addEventListener('click', () => {
+        zoomTo(window.innerWidth / 2, window.innerHeight / 2, 1.2);
+      });
+      document.getElementById('zoom-out').addEventListener('click', () => {
+        zoomTo(window.innerWidth / 2, window.innerHeight / 2, 0.8);
+      });
+      document.getElementById('zoom-reset').addEventListener('click', resetView);
+
+      // ---------- Init ----------
+      window.addEventListener('resize', resize);
+      updateToolUI();
+      updateHistoryButtons();
+      resize();
+    })();
+  </script>
+</body>
+</html>

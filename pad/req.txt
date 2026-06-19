@@ -1,0 +1,30 @@
+what the user can do:
+1. pick the color/width of the stroke
+2. zoom in and zoom out, however set a limit on the zoom 
+in and zoom out size so the user doesn't infinitely zoom in or out, so there are 
+two modes, one is drawing mode, one is moving mode
+3. highlighter, where the stroke is a little bit opaque, 
+i am not sure about the opacity required, so you should think about what
+opactiy to use
+4. eraser, there should be stroke erase which erases the whole stroke 
+(one connected stroke without breaks), precision eraser which erases pixel by pixel
+highlighter eraser which only erases the highlighter
+5. reverse the last operation (ctrl z / ctrl y (restore)), 
+there should also be buttons for these
+
+what i don't want:
+1.weird background, a simple white background will be good
+2.small canva, the canva should take up most of the screen
+3.weird ratio for mobile user, it should scale nicely for mobile users as well
+4.small buttons on mobile, it should be decently sized so mobile users can click
+easily
+
+reference: + what is bad about them
+https://sketch.io/sketchpad/ -- the background is too messy
+https://www.autodraw.com/ -- zoom function is ill-implemented, there's no zoom out
+,and it's a global zoom, so using two fingers to zoom in and zoom out does not work on
+mobile and it also globally zoom desktop, should only zoom the canvas, other functions
+are pretty nice 
+https://excalidraw.com/ -- very good example of all the functions
+, with nicely designed buttons as well, just don't have the function of highlighters
+
