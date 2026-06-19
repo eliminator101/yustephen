@@ -1,5 +1,0 @@
-{
-  "version": 1,
-  "include": ["/mirror/proxy/*"],
-  "exclude": ["/mirror/*"]
-}
